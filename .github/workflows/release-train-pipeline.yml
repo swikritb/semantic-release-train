@@ -1,0 +1,185 @@
+# Release Train — PR-gated semantic-release.
+#
+# The core rule: nothing ever pushes straight to `main` — not even the
+# release commit itself. Every change, including the automation's own
+# version bump, goes through a normal, reviewable Pull Request.
+#
+#   1. prepare-release-pr (runs after every push to main): computes the next
+#      version + notes via semantic-release's dry-run JS API (see
+#      compute-release.mjs — a real `npx semantic-release` run tags/pushes as
+#      a core step regardless of publish plugins, which would land a tag on
+#      main before review; dry-run never does), applies the version bump and
+#      changelog itself, then opens a PR from a fresh bump-release/vX.Y.Z
+#      branch into main. No-ops if there's nothing releasable.
+#   2. publish-release (runs on every push to main, including the one that
+#      lands when a release PR gets merged): if package.json's version has
+#      no matching git tag yet, tags that commit and creates the GitHub
+#      Release. This never pushes to main — it only tags/publishes a
+#      commit a human already reviewed and merged.
+#
+# See docs/architecture.md for the full design writeup and docs/bugs-found.md
+# for the real bugs a live test run caught before this shipped.
+#
+# Known limitation (see docs/setup.md#known-limitations): this uses the
+# default GITHUB_TOKEN to open the release PR. GitHub Actions does not
+# trigger other workflows (e.g. your CI) for PRs opened with GITHUB_TOKEN,
+# so a human needs to manually nudge CI (push an empty commit, or
+# close/reopen) on the release PR before it can be merged.
+
+name: Release Train
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  prepare-release-pr:
+    name: Prepare release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Uses semantic-release's dryRun mode (via compute-release.mjs) rather
+      # than a normal `npx semantic-release` run. A normal run tags and
+      # pushes the computed version as a core step, regardless of which
+      # publish plugins are configured — that would land a premature tag
+      # directly on main, before any PR review. dryRun never tags or
+      # pushes anything; we apply the version bump ourselves below, only
+      # after semantic-release has told us the number. (See
+      # docs/bugs-found.md — Bug #1.)
+      - name: Compute next release (dry-run — no tag, no push)
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node compute-release.mjs
+
+      - name: Open or update the release PR
+        if: steps.release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          BRANCH="bump-release/v${VERSION}"
+
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          cp .next-notes.md .pr-body.md
+          node -e "
+            const fs = require('fs');
+            const notes = fs.readFileSync('.next-notes.md', 'utf8');
+            fs.writeFileSync('.release-notes.b64', Buffer.from(notes).toString('base64'));
+          "
+          node clean-changelogs.js "$VERSION"
+
+          git checkout -b "$BRANCH"
+          git add package.json changelog.md
+          if [ -f changelog_archive.md ]; then git add changelog_archive.md; fi
+          git commit -m "chore(release): ${VERSION}"
+          git push -u origin "$BRANCH" --force
+
+          # Close any other OPEN bump-release/* PR from a prior cycle — a
+          # second mergeable merge to main before the first PR is reviewed
+          # produces a stale, now-outdated PR otherwise (it computed a
+          # version that didn't include the newer commit). See
+          # docs/bugs-found.md — Bug #2.
+          gh pr list --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"bump-release/\")) | select(.headRefName != \"$BRANCH\") | .number" |
+          while read -r stale; do
+            gh pr close "$stale" --delete-branch \
+              --comment "Superseded by a newer release-train cycle (${BRANCH})."
+          done
+
+          # gh pr view/edit match PRs by branch name regardless of state, so
+          # a previously-closed PR on this exact branch name would silently
+          # get edited instead of a fresh PR being opened. Query open PRs
+          # explicitly instead.
+          PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit "$PR_NUMBER" --title "chore(release): v${VERSION}" --body-file .pr-body.md
+          else
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore(release): v${VERSION}" --body-file .pr-body.md
+          fi
+
+  publish-release:
+    name: Publish release (tag + GitHub Release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Serialize runs so concurrent pushes to main can't both pass the
+    # tag-existence check before either one actually pushes the tag.
+    concurrency:
+      group: release-train-publish
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag and publish if this commit is an unreleased version bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — nothing to publish."
+            exit 0
+          fi
+
+          node -e "
+            const fs = require('fs');
+            const lines = fs.readFileSync('changelog.md', 'utf8').split('\n');
+            // semantic-release's writer heads major/minor releases with a
+            // single '#' and patch releases with '##' — match either, but
+            // not the '### Bug Fixes' subheadings, and not the bare '#
+            // Changelog' document title (also single-hash) — require an
+            // actual version number, which only real release headings have.
+            // (See docs/bugs-found.md — Bug #4.)
+            const HEADING = /^#{1,2} .*\d+\.\d+\.\d+/;
+            const start = lines.findIndex((l) => HEADING.test(l));
+            let end = lines.length;
+            for (let i = start + 1; i < lines.length; i++) {
+              if (HEADING.test(lines[i])) { end = i; break; }
+            }
+            fs.writeFileSync('.release-notes.md', lines.slice(start, end).join('\n').trim() + '\n');
+          "
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+
+          if ! git push origin "$TAG"; then
+            git fetch --tags origin
+            if git rev-parse "$TAG" >/dev/null 2>&1; then
+              echo "Tag $TAG was already published by a concurrent run — nothing to do."
+              exit 0
+            fi
+            echo "Failed to push tag $TAG for a reason other than a race — failing the job."
+            exit 1
+          fi
+
+          gh release create "$TAG" --title "$TAG" --notes-file .release-notes.md

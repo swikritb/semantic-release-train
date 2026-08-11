@@ -1,0 +1,5 @@
+node_modules/
+.next-notes.md
+.pr-body.md
+.release-notes.b64
+.release-notes.md

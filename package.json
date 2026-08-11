@@ -1,0 +1,12 @@
+{
+  "name": "semantic-release-train",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A PR-gated release automation pipeline built on semantic-release: nothing ever ships before a human reviews it — not even the release commit itself.",
+  "license": "MIT",
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/release-notes-generator": "^14.1.1",
+    "semantic-release": "^25.0.8"
+  }
+}
