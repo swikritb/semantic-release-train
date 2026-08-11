@@ -20,11 +20,11 @@
 # See docs/architecture.md for the full design writeup and docs/bugs-found.md
 # for the real bugs a live test run caught before this shipped.
 #
-# Known limitation (see docs/setup.md#known-limitations): this uses the
-# default GITHUB_TOKEN to open the release PR. GitHub Actions does not
-# trigger other workflows (e.g. your CI) for PRs opened with GITHUB_TOKEN,
-# so a human needs to manually nudge CI (push an empty commit, or
-# close/reopen) on the release PR before it can be merged.
+# Requires two repo-level settings before this will work at all — see
+# docs/setup.md#3-required-repo-settings. Without
+# can_approve_pull_request_reviews=true, PR creation below fails outright.
+# With it granted, the release PR opens normally and your other CI
+# workflows trigger on it like any other PR — no manual nudge needed.
 
 name: Release Train
 

@@ -105,8 +105,6 @@ Honestly listed, not hidden:
   `publish-release`.
 - `commitlint` as a required CI check, so a malformed commit type fails the
   PR at review time instead of silently producing zero release afterward.
-- A Personal Access Token for the release bot, so CI auto-triggers on its
-  own PRs instead of needing a manual nudge.
 - SHA-pinning third-party Actions, with a dependency bot to keep them
   current.
 - Verifying branch protection is a platform-enforced rule, not just

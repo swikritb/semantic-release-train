@@ -35,7 +35,9 @@ gh api -X PUT repos/<owner>/<repo>/actions/permissions/workflow \
 
 Without `can_approve_pull_request_reviews=true`, `gh pr create` in
 `prepare-release-pr` fails outright — not a soft "CI won't auto-trigger"
-limitation, an actual failure.
+limitation, an actual failure. With both settings enabled, the release PR
+opens normally and your other CI workflows (build/test, etc.) trigger on it
+like any other PR — no manual nudge needed.
 
 ## 4. Adopt (or adapt) the commit convention
 
@@ -53,13 +55,12 @@ included in this template yet.
 
 ## Known limitations
 
-- **Release PRs don't auto-trigger your other CI.** This pipeline opens the
-  release PR using the default `GITHUB_TOKEN`, and GitHub Actions does not
-  trigger other workflows (build/test CI, etc.) for PRs opened with that
-  token. A reviewer needs to manually nudge CI — an empty commit, or
-  close/reopen the PR — before merging if your branch protection requires
-  passing checks. A real Personal Access Token for the release bot would
-  remove this, at the cost of a dedicated bot account to manage.
+- **If the `can_approve_pull_request_reviews` setting isn't granted, PR
+  creation fails outright** — not a soft "CI won't auto-trigger" limitation,
+  an actual failure of the `prepare-release-pr` job. With it granted (see
+  step 3 above), the release PR opens normally and your other CI workflows
+  trigger on it exactly like any other PR — confirmed in practice, not just
+  assumed.
 - **Only `publish-release` is concurrency-guarded.** `prepare-release-pr`
   isn't yet — two releasable pushes landing within seconds of each other
   could theoretically race on the version-bump commit. Not exercised or
