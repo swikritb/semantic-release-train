@@ -7,9 +7,9 @@ messages — but **nothing ever ships before a human reviews it, not even the
 release commit itself.**
 
 ```
-feat: add CSV export for transaction history      →  minor
-fix: correct rounding error in payout calculation  →  patch
-feat!: redesign public API response envelope       →  major
+feat: add CSV export for the reports page          →  minor
+fix: correct rounding error in the totals column    →  patch
+feat!: redesign public API response envelope        →  major
 ```
 
 ## Why this exists

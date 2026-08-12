@@ -4,8 +4,8 @@ This pipeline reads [Conventional Commits](https://www.conventionalcommits.org/e
 to decide whether a release is warranted at all, and if so, what kind.
 
 ```
-feat: add CSV export for transaction history
-fix: correct rounding error in payout calculation
+feat: add CSV export for the reports page
+fix: correct rounding error in the totals column
 feat!: redesign public API response envelope
 
 BREAKING CHANGE: `data` field renamed to `items`
