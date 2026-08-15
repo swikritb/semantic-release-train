@@ -31,7 +31,7 @@ on `main` without a reviewable PR — including the automation's own
 commits.**
 
 Full write-up, including the real bugs a live test run caught before this
-shipped: **[Medium article — INSERT LINK]**
+shipped: https://medium.com/@swikritb/i-automated-releases-without-giving-the-bot-control-of-main-576090c3a1b8
 
 ## How it works
 
